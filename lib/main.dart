@@ -145,6 +145,278 @@ class DatabaseHelper {
   }
 }
 
+// =========================================================================
+
+class TaskFormScreen extends StatefulWidget {
+  final Task? task;
+  const TaskFormScreen({Key? key, this.task}) : super(key: key);
+
+  @override
+  State<TaskFormScreen> createState() => _TaskFormScreenState();
+}
+
+class _TaskFormScreenState extends State<TaskFormScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late String _title;
+  late String _description;
+  late Priority _selectedPriority;
+  late UnidadeOperacional _selectedUnit;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = widget.task?.title ?? '';
+    _description = widget.task?.description ?? '';
+    _selectedPriority = widget.task?.priority ?? Priority.media;
+    _selectedUnit = widget.task?.operationalUnit ?? UnidadeOperacional.ti;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.task == null ? 'Nova Tarefa' : 'Editar Tarefa'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              TextFormField(
+                initialValue: _title,
+                decoration: const InputDecoration(labelText: 'Título'),
+                validator: (v) =>
+                    v == null || v.isEmpty ? 'Título obrigatório' : null,
+                onSaved: (v) => _title = v!,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                initialValue: _description,
+                decoration: const InputDecoration(labelText: 'Descrição'),
+                maxLines: 3,
+                validator: (v) =>
+                    (v == null || v.length < 5) ? 'Mínimo 5 caracteres' : null,
+                onSaved: (v) => _description = v!,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<Priority>(
+                value: _selectedPriority,
+                decoration: const InputDecoration(labelText: 'Prioridade'),
+                items: Priority.values
+                    .map(
+                      (p) => DropdownMenuItem(
+                        value: p,
+                        child: Text(p.toString().split('.').last.toUpperCase()),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedPriority = v!),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<UnidadeOperacional>(
+                value: _selectedUnit,
+                decoration: const InputDecoration(
+                  labelText: 'Unidade Operacional',
+                ),
+                items: UnidadeOperacional.values.map((u) {
+                  final label = u.toString().split('.').last;
+                  return DropdownMenuItem(
+                    value: u,
+                    child: Text(label[0].toUpperCase() + label.substring(1)),
+                  );
+                }).toList(),
+                onChanged: (v) => setState(() => _selectedUnit = v!),
+              ),
+              const SizedBox(height: 32),
+
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: Text(widget.task == null ? 'SALVAR' : 'ATUALIZAR'),
+                onPressed: () async {
+                  if (_formKey.currentState!.validate()) {
+                    _formKey.currentState!.save();
+
+                    final Task newTask = Task(
+                      id: widget.task?.id,
+                      title: _title,
+                      description: _description,
+                      priority: _selectedPriority,
+                      createdAt: widget.task?.createdAt ?? DateTime.now(),
+                      operationalUnit: _selectedUnit,
+                    );
+
+                    final dbHelper = DatabaseHelper.instance;
+                    if (newTask.id == null) {
+                      await dbHelper.insert(newTask);
+                    } else {
+                      await dbHelper.update(newTask);
+                    }
+
+                    if (!mounted) return;
+
+                    Navigator.pop(context, true);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+//==================================================================
+
+class TaskListScreen extends StatefulWidget {
+  const TaskListScreen({Key? key}) : super(key: key);
+
+  @override
+  State<TaskListScreen> createState() => _TaskListScreenState();
+}
+
+class _TaskListScreenState extends State<TaskListScreen> {
+  final dbHelper = DatabaseHelper.instance;
+  late Future<List<Task>> _tasksFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tasksFuture = dbHelper.queryAllTasks();
+  }
+
+  void _refreshTaskList() {
+    setState(() {
+      _tasksFuture = dbHelper.queryAllTasks();
+    });
+  }
+
+  String _formatDate(DateTime date) {
+    String day = date.day.toString().padLeft(2, '0');
+    String month = date.month.toString().padLeft(2, '0');
+    String year = date.year.toString();
+    String hour = date.hour.toString().padLeft(2, '0');
+    String minute = date.minute.toString().padLeft(2, '0');
+    return "$day/$month/$year às $hour:$minute";
+  }
+
+  void _navigateAndEditTask(Task? task) async {
+    final bool? result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => TaskFormScreen(task: task)),
+    );
+    if (result == true) _refreshTaskList();
+  }
+
+  void _deleteTask(int id) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir Tarefa?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await dbHelper.delete(id);
+      _refreshTaskList();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Lista de Tarefas')),
+      body: FutureBuilder<List<Task>>(
+        future: _tasksFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+            final tasks = snapshot.data!;
+            return ListView.builder(
+              itemCount: tasks.length,
+              itemBuilder: (context, index) {
+                final task = tasks[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Task.getPriorityColor(task.priority),
+                      radius: 10,
+                    ),
+                    title: Text(
+                      task.title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          task.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Unidade: ${task.operationalUnitString} | ${_formatDate(task.createdAt)}",
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.edit,
+                            color: Colors.deepPurple,
+                          ),
+                          onPressed: () => _navigateAndEditTask(task),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _deleteTask(task.id!),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          }
+          return const Center(child: Text('Nenhuma tarefa cadastrada.'));
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _navigateAndEditTask(null),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
 // ==================== MAIN =====================================================
 
 void main() {
