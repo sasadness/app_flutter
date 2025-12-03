@@ -112,6 +112,37 @@ class DatabaseHelper {
       },
     );
   }
+
+  // ============== CRUD =================================
+
+  Future<int> insert(Task task) async {
+    Database db = await instance.database;
+    return await db.insert(table, task.toMap());
+  }
+
+  Future<List<Task>> queryAllTasks() async {
+    Database db = await instance.database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      table,
+      orderBy: "$columnId DESC",
+    );
+    return List.generate(maps.length, (i) => Task.fromMap(maps[i]));
+  }
+
+  Future<int> update(Task task) async {
+    Database db = await instance.database;
+    return await db.update(
+      table,
+      task.toMap(),
+      where: '$columnId = ?',
+      whereArgs: [task.id],
+    );
+  }
+
+  Future<int> delete(int id) async {
+    Database db = await instance.database;
+    return await db.delete(table, where: '$columnId = ?', whereArgs: [id]);
+  }
 }
 
 // ==================== MAIN =====================================================
@@ -145,7 +176,7 @@ class TaskApp extends StatelessWidget {
           isDense: true,
         ),
       ),
-      // home: const TaskListScreen(),
+      home: const TaskListScreen(),
     );
   }
 }
